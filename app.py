@@ -104,3 +104,100 @@ def location_score(address: str):
         "distance_to_ZH_HB_m": distance,
         "location_score": round(score, 1),
     }
+
+
+
+from fastapi import FastAPI, Query
+from fastapi.responses import HTMLResponse, JSONResponse
+from typing import List
+
+app = FastAPI()
+
+# 1) Interaktive Karte (HTML)
+@app.get("/map", response_class=HTMLResponse)
+def map_page():
+    return """
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>VaimoAI Preis-Karte</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+  <style>
+    html, body, #map { height: 100%; margin: 0; }
+    .price-label {
+      background: white; border-radius: 16px; padding: 6px 10px;
+      font-family: system-ui, -apple-system, Segoe UI, Roboto;
+      font-weight: 700; box-shadow: 0 2px 8px rgba(0,0,0,.2);
+      border: 1px solid rgba(0,0,0,.08);
+      white-space: nowrap;
+    }
+  </style>
+</head>
+<body>
+<div id="map"></div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+  const map = L.map('map').setView([47.3769, 8.5417], 11); // Zürich
+
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    maxZoom: 19,
+    attribution: '&copy; OpenStreetMap'
+  }).addTo(map);
+
+  let layer;
+
+  async function loadData() {
+    const b = map.getBounds();
+    const bbox = [b.getWest(), b.getSouth(), b.getEast(), b.getNorth()].join(",");
+    const res = await fetch(`/map/prices?bbox=${encodeURIComponent(bbox)}`);
+    const geo = await res.json();
+
+    if (layer) layer.remove();
+
+    layer = L.geoJSON(geo, {
+      pointToLayer: (feature, latlng) => {
+        const p = feature.properties;
+        const html = `<div class="price-label">${p.price} ${p.currency}</div>`;
+        const icon = L.divIcon({ html, className: "", iconSize: [1,1] });
+        return L.marker(latlng, { icon }).bindPopup(
+          `<b>${p.title}</b><br/>${p.price} ${p.currency}<br/>${p.address}`
+        );
+      }
+    }).addTo(map);
+  }
+
+  map.on('moveend zoomend', loadData);
+  loadData();
+</script>
+</body>
+</html>
+"""
+
+# 2) Daten-Endpoint (GeoJSON) – erst mal Dummy, später echte Comparables
+@app.get("/map/prices")
+def map_prices(bbox: str = Query(..., description="minLon,minLat,maxLon,maxLat")):
+    # bbox wird hier nur akzeptiert; du kannst später damit filtern
+    features = [
+        {
+            "type": "Feature",
+            "geometry": {"type": "Point", "coordinates": [8.5417, 47.3769]},
+            "properties": {
+                "price": 310, "currency": "CHF",
+                "title": "Beispiel-Objekt Zürich",
+                "address": "Zürich"
+            }
+        },
+        {
+            "type": "Feature",
+            "geometry": {"type": "Point", "coordinates": [8.516, 47.391]},
+            "properties": {
+                "price": 463, "currency": "CHF",
+                "title": "Beispiel-Objekt Kreis 10",
+                "address": "Zürich"
+            }
+        },
+    ]
+    return JSONResponse({"type": "FeatureCollection", "features": features})
